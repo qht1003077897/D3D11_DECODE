@@ -7,12 +7,14 @@
 #include <cassert>
 #include <intrin.h>
 
+
 // 静态成员初始化
 HMODULE KMTInterceptor::s_hGdi32 = nullptr;
 PFN_D3DKMT_OPENADAPTERFROMHDC KMTInterceptor::s_OriginalOpenAdapterFromHdc = nullptr;
 PFN_D3DKMT_OPENADAPTERFROMDEVICENAME KMTInterceptor::s_OriginalOpenAdapterFromDeviceName = nullptr;
 PFN_D3DKMT_CREATEDEVICE KMTInterceptor::s_OriginalCreateDevice = nullptr;
 PFN_D3DKMT_CREATECONTEXT KMTInterceptor::s_OriginalCreateContext = nullptr;
+PFN_D3DKMT_CREATECONTEXTVIRTUAL KMTInterceptor::s_OriginalCreateContextVirtual = nullptr;
 PFN_D3DKMT_DESTROYDEVICE KMTInterceptor::s_OriginalDestroyDevice = nullptr;
 PFN_D3DKMT_DESTROYCONTEXT KMTInterceptor::s_OriginalDestroyContext = nullptr;
 PFN_D3DKMT_PRESENT KMTInterceptor::s_OriginalPresent = nullptr;
@@ -35,7 +37,7 @@ PFN_D3DKMT_CREATEHWQUEUE KMTInterceptor::s_OriginalCreateHwQueue = nullptr;
 PFN_D3DKMT_DESTROYHWQUEUE KMTInterceptor::s_OriginalDestroyHwQueue = nullptr;
 PFN_D3DKMT_ENUMADAPTERS KMTInterceptor::s_OriginalEnumAdapters = nullptr;
 PFN_D3DKMT_LOCK KMTInterceptor::s_OriginalLock = nullptr;
-PFN_D3DKMT_UNLOCK KMTInterceptor::s_OriginalUnlock = nullptr;
+PFN_D3DKMT_UNLOCK2 KMTInterceptor::s_OriginalUnlock2 = nullptr;
 
 PFN_D3DKMT_RENDER KMTInterceptor::s_OriginalRender;
 PFN_D3DKMT_FLIPOVERLAY KMTInterceptor::s_OriginalFlipOverlay = nullptr;
@@ -67,6 +69,19 @@ PFN_D3DKMT_SETDISPLAYMODE KMTInterceptor::s_OriginalSetDisplayMode = nullptr;
 PFN_D3DKMT_SUBMITCOMMANDTOHWQUEUE KMTInterceptor::s_OriginalSubmitCommandToHwQueue = nullptr;
 PFN_D3DKMT_SUBMITPRESENTBLTTOHWQUEUE KMTInterceptor::s_OriginalSubmitPresentBltToHwQueue = nullptr;
 PFN_D3DKMT_SUBMITPRESENTTOHWQUEUE KMTInterceptor::s_OriginalSubmitPresentToHwQueue = nullptr;
+
+PFN_D3DKMT_MAKERESIDENT KMTInterceptor::s_OriginalMakeResident = nullptr;
+PFN_D3DKMT_EVICT KMTInterceptor::s_OriginalEvict = nullptr;
+PFN_D3DKMT_CREATEPAGINGQUEUE KMTInterceptor::s_OriginalCreatePagingQueue = nullptr;
+
+PFN_D3DKMT_CREATESYNCHRONIZATIONOBJECT KMTInterceptor::s_OriginalCreateSysObj = nullptr;
+PFN_D3DKMT_CREATESYNCHRONIZATIONOBJECT2 KMTInterceptor::s_OriginalCreateSysObj2 = nullptr;
+PFN_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU KMTInterceptor::s_OriginalWaitSysObjCpu = nullptr;
+PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU KMTInterceptor::s_OriginalSignalSysObjCpu = nullptr;
+PFN_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU KMTInterceptor::s_OriginalWaitSysObGpu = nullptr;
+PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU KMTInterceptor::s_OriginalSignalSysObjGpu = nullptr;
+PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2 KMTInterceptor::s_OriginalSignalSysObjGpu2 = nullptr;
+
 
 // Helper: convert narrow (ANSI) C string to wide string using system ANSI code page
 static std::wstring AnsiToWString(const char* s) {
@@ -153,6 +168,11 @@ bool KMTInterceptor::Initialize() {
  GetProcAddress(s_hGdi32, "D3DKMTCreateDevice"));
  s_OriginalCreateContext = reinterpret_cast<PFN_D3DKMT_CREATECONTEXT>(
  GetProcAddress(s_hGdi32, "D3DKMTCreateContext"));
+ s_OriginalCreateContextVirtual = reinterpret_cast<PFN_D3DKMT_CREATECONTEXTVIRTUAL>(
+     GetProcAddress(s_hGdi32, "D3DKMTCreateContextVirtual"));
+
+
+
  s_OriginalDestroyDevice = reinterpret_cast<PFN_D3DKMT_DESTROYDEVICE>(
  GetProcAddress(s_hGdi32, "D3DKMTDestroyDevice"));
  s_OriginalDestroyContext = reinterpret_cast<PFN_D3DKMT_DESTROYCONTEXT>(
@@ -193,8 +213,8 @@ bool KMTInterceptor::Initialize() {
  GetProcAddress(s_hGdi32, "D3DKMTEnumAdapters"));
  s_OriginalLock = reinterpret_cast<PFN_D3DKMT_LOCK>(
  GetProcAddress(s_hGdi32, "D3DKMTLock"));
- s_OriginalUnlock = reinterpret_cast<PFN_D3DKMT_UNLOCK>(
- GetProcAddress(s_hGdi32, "D3DKMTUnlock"));
+ s_OriginalUnlock2 = reinterpret_cast<PFN_D3DKMT_UNLOCK2>(
+ GetProcAddress(s_hGdi32, "D3DKMTUnlock2"));
 
  s_OriginalRender = reinterpret_cast<PFN_D3DKMT_RENDER>(
      GetProcAddress(s_hGdi32, "D3DKMTRender"));
@@ -255,6 +275,29 @@ bool KMTInterceptor::Initialize() {
  s_OriginalSubmitPresentToHwQueue = reinterpret_cast<PFN_D3DKMT_SUBMITPRESENTTOHWQUEUE>(
  GetProcAddress(s_hGdi32, "D3DKMTSubmitPresentToHwQueue"));
 
+ s_OriginalMakeResident = reinterpret_cast<PFN_D3DKMT_MAKERESIDENT>(
+     GetProcAddress(s_hGdi32, "D3DKMTMakeResident"));
+ s_OriginalEvict = reinterpret_cast<PFN_D3DKMT_EVICT>(
+     GetProcAddress(s_hGdi32, "D3DKMTEvict"));
+ s_OriginalCreatePagingQueue = reinterpret_cast<PFN_D3DKMT_CREATEPAGINGQUEUE>(
+     GetProcAddress(s_hGdi32, "D3DKMTCreatePagingQueue"));
+
+ s_OriginalCreateSysObj = reinterpret_cast<PFN_D3DKMT_CREATESYNCHRONIZATIONOBJECT>(
+     GetProcAddress(s_hGdi32, "D3DKMTCreateSynchronizationObject"));
+ s_OriginalCreateSysObj2 = reinterpret_cast<PFN_D3DKMT_CREATESYNCHRONIZATIONOBJECT2>(
+     GetProcAddress(s_hGdi32, "D3DKMTCreateSynchronizationObject2"));
+
+ s_OriginalWaitSysObjCpu = reinterpret_cast<PFN_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU>(
+     GetProcAddress(s_hGdi32, "D3DKMTWaitForSynchronizationObjectFromCpu"));
+ s_OriginalSignalSysObjCpu = reinterpret_cast<PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU>(
+     GetProcAddress(s_hGdi32, "D3DKMTSignalSynchronizationObjectFromCpu"));
+
+ s_OriginalWaitSysObGpu = reinterpret_cast<PFN_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU>(
+     GetProcAddress(s_hGdi32, "D3DKMTWaitForSynchronizationObjectFromGpu"));
+ s_OriginalSignalSysObjGpu = reinterpret_cast<PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU>(
+     GetProcAddress(s_hGdi32, "D3DKMTSignalSynchronizationObjectFromGpu"));
+ s_OriginalSignalSysObjGpu2 = reinterpret_cast<PFN_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2>(
+     GetProcAddress(s_hGdi32, "D3DKMTSignalSynchronizationObjectFromGpu2"));
  // 安装钩子
  InstallHooks();
 
@@ -279,6 +322,7 @@ void KMTInterceptor::InstallHooks() {
  DetourAttach(&(PVOID&)s_OriginalOpenAdapterFromDeviceName, Hooked_D3DKMTOpenAdapterFromDeviceName);
  DetourAttach(&(PVOID&)s_OriginalCreateDevice, Hooked_D3DKMTCreateDevice);
  DetourAttach(&(PVOID&)s_OriginalCreateContext, Hooked_D3DKMTCreateContext);
+ DetourAttach(&(PVOID&)s_OriginalCreateContextVirtual, Hooked_D3DKMTCreateContextVirtual);
  DetourAttach(&(PVOID&)s_OriginalDestroyDevice, Hooked_D3DKMTDestroyDevice);
  DetourAttach(&(PVOID&)s_OriginalDestroyContext, Hooked_D3DKMTDestroyContext);
  DetourAttach(&(PVOID&)s_OriginalPresent, Hooked_D3DKMTPresent);
@@ -301,7 +345,7 @@ void KMTInterceptor::InstallHooks() {
  DetourAttach(&(PVOID&)s_OriginalDestroyHwQueue, Hooked_D3DKMTDestroyHwQueue);
  DetourAttach(&(PVOID&)s_OriginalEnumAdapters, Hooked_D3DKMTEnumAdapters);
  DetourAttach(&(PVOID&)s_OriginalLock, Hooked_D3DKMTLock);
- DetourAttach(&(PVOID&)s_OriginalUnlock, Hooked_D3DKMTUnlock);
+ DetourAttach(&(PVOID&)s_OriginalUnlock2, Hooked_D3DKMTUnlock2);
 
  DetourAttach(&(PVOID&)s_OriginalRender, Hooked_D3DKMTRender);
  DetourAttach(&(PVOID&)s_OriginalFlipOverlay, Hooked_D3DKMTFlipOverlay);
@@ -334,6 +378,18 @@ void KMTInterceptor::InstallHooks() {
  DetourAttach(&(PVOID&)s_OriginalSubmitPresentBltToHwQueue, Hooked_D3DKMTSubmitPresentBltToHwQueue);
  DetourAttach(&(PVOID&)s_OriginalSubmitPresentToHwQueue, Hooked_D3DKMTSubmitPresentToHwQueue);
 
+ DetourAttach(&(PVOID&)s_OriginalMakeResident, Hooked_D3DKMTMAKERESIDENT);
+ DetourAttach(&(PVOID&)s_OriginalEvict, Hooked_D3DKMTEVICT);
+ DetourAttach(&(PVOID&)s_OriginalCreatePagingQueue, Hooked_D3DKMTCREATEPAGINGQUEUE);
+
+ DetourAttach(&(PVOID&)s_OriginalCreateSysObj, Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT);
+ DetourAttach(&(PVOID&)s_OriginalCreateSysObj2, Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT2);
+ DetourAttach(&(PVOID&)s_OriginalWaitSysObjCpu, Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU);
+ DetourAttach(&(PVOID&)s_OriginalSignalSysObjCpu, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU);
+ DetourAttach(&(PVOID&)s_OriginalWaitSysObGpu, Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU);
+ DetourAttach(&(PVOID&)s_OriginalSignalSysObjGpu, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU);
+ DetourAttach(&(PVOID&)s_OriginalSignalSysObjGpu2, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2);
+
  ret = DetourTransactionCommit();
  assert(ret == NO_ERROR);
  //这里使用简单的内存补丁方法
@@ -351,6 +407,7 @@ void KMTInterceptor::RemoveHooks() {
  DetourDetach(&(PVOID&)s_OriginalOpenAdapterFromDeviceName, Hooked_D3DKMTOpenAdapterFromDeviceName);
  DetourDetach(&(PVOID&)s_OriginalCreateDevice, Hooked_D3DKMTCreateDevice);
  DetourDetach(&(PVOID&)s_OriginalCreateContext, Hooked_D3DKMTCreateContext);
+ DetourDetach(&(PVOID&)s_OriginalCreateContextVirtual, Hooked_D3DKMTCreateContextVirtual);
  DetourDetach(&(PVOID&)s_OriginalDestroyDevice, Hooked_D3DKMTDestroyDevice);
  DetourDetach(&(PVOID&)s_OriginalDestroyContext, Hooked_D3DKMTDestroyContext);
  DetourDetach(&(PVOID&)s_OriginalPresent, Hooked_D3DKMTPresent);
@@ -372,7 +429,7 @@ void KMTInterceptor::RemoveHooks() {
  DetourDetach(&(PVOID&)s_OriginalDestroyHwQueue, Hooked_D3DKMTDestroyHwQueue);
  DetourDetach(&(PVOID&)s_OriginalEnumAdapters, Hooked_D3DKMTEnumAdapters);
  DetourDetach(&(PVOID&)s_OriginalLock, Hooked_D3DKMTLock);
- DetourDetach(&(PVOID&)s_OriginalUnlock, Hooked_D3DKMTUnlock);
+ DetourDetach(&(PVOID&)s_OriginalUnlock2, Hooked_D3DKMTUnlock2);
 
  DetourDetach(&(PVOID&)s_OriginalRender, Hooked_D3DKMTRender);
  DetourDetach(&(PVOID&)s_OriginalFlipOverlay, Hooked_D3DKMTFlipOverlay);
@@ -404,7 +461,17 @@ void KMTInterceptor::RemoveHooks() {
  DetourDetach(&(PVOID&)s_OriginalSubmitCommandToHwQueue, Hooked_D3DKMTSubmitCommandToHwQueue);
  DetourDetach(&(PVOID&)s_OriginalSubmitPresentBltToHwQueue, Hooked_D3DKMTSubmitPresentBltToHwQueue);
  DetourDetach(&(PVOID&)s_OriginalSubmitPresentToHwQueue, Hooked_D3DKMTSubmitPresentToHwQueue);
+ DetourDetach(&(PVOID&)s_OriginalMakeResident, Hooked_D3DKMTMAKERESIDENT);
+ DetourDetach(&(PVOID&)s_OriginalEvict, Hooked_D3DKMTEVICT);
+ DetourDetach(&(PVOID&)s_OriginalCreatePagingQueue, Hooked_D3DKMTCREATEPAGINGQUEUE);
 
+ DetourDetach(&(PVOID&)s_OriginalCreateSysObj, Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT);
+ DetourDetach(&(PVOID&)s_OriginalCreateSysObj2, Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT2);
+ DetourDetach(&(PVOID&)s_OriginalWaitSysObjCpu, Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU);
+ DetourDetach(&(PVOID&)s_OriginalSignalSysObjCpu, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU);
+ DetourDetach(&(PVOID&)s_OriginalWaitSysObGpu, Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU);
+ DetourDetach(&(PVOID&)s_OriginalSignalSysObjGpu, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU);
+ DetourDetach(&(PVOID&)s_OriginalSignalSysObjGpu2, Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2);
  ret = DetourTransactionCommit();
  assert(ret == NO_ERROR);
  LogMessage(L"Hooks would be remove here");
@@ -415,7 +482,7 @@ void KMTInterceptor::RemoveHooks() {
 // ========== KMT 钩子实现 ==========
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryAdapterInfo(const D3DKMT_QUERYADAPTERINFO* pData) {
- std::wstring header = L"D3DKMTQueryAdapterInfo 被调用 ";
+ std::wstring header = L"D3DKMTQueryAdapterInfo 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L" hAdapter:0x%llX, Type: %u", (unsigned long long)pData->hAdapter, (unsigned)pData->Type);
  LogMessage(L" pPrivateDriverData 大小: %u bytes", pData->PrivateDriverDataSize);
@@ -423,11 +490,19 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryAdapterInfo(const D3DKMT_QUERY
  NTSTATUS result = s_OriginalQueryAdapterInfo ? s_OriginalQueryAdapterInfo(const_cast<D3DKMT_QUERYADAPTERINFO*>(pData)) :0;
 
  LogMessage(L"D3DKMTQueryAdapterInfo 返回:0x%X", result);
+
+ D3DKMT_ISFEATUREENABLED feature;
+ feature.hAdapter = pData->hAdapter;
+ feature.FeatureId = DXGK_FEATURE_USER_MODE_SUBMISSION;
+ NTSTATUS s = D3DKMTIsFeatureEnabled(&feature);
+ if (s >= 0) {
+     LogMessage(L"D3DKMTIsFeatureEnabled sucess");
+ }
  return result;
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenResource(D3DKMT_OPENRESOURCE* pData) {
- std::wstring header = L"D3DKMTOpenResource 被调用 ";
+ std::wstring header = L"D3DKMTOpenResource 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L" hDevice:0x%llX, hGlobalShare:0x%llX", (unsigned long long)pData->hDevice, (unsigned long long)pData->hGlobalShare);
 
@@ -438,7 +513,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenResource(D3DKMT_OPENRESOURCE* p
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE* pData) {
- std::wstring header = L"D3DKMTOpenResourceFromNtHandle 被调用 ";
+ std::wstring header = L"D3DKMTOpenResourceFromNtHandle 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L" hDevice:0x%llX, hNtHandle:0x%p", (unsigned long long)pData->hDevice, pData->hNtHandle);
 
@@ -449,7 +524,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenResourceFromNtHandle(D3DKMT_OPE
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryResourceInfo(D3DKMT_QUERYRESOURCEINFO* pData) {
- std::wstring header = L"D3DKMTQueryResourceInfo 被调用 ";
+ std::wstring header = L"D3DKMTQueryResourceInfo 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L" hDevice:0x%llX, hGlobalShare:0x%llX", (unsigned long long)pData->hDevice, (unsigned long long)pData->hGlobalShare);
 
@@ -463,7 +538,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryResourceInfo(D3DKMT_QUERYRESOU
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryResourceInfoFromNtHandle(D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE* pData) {
- std::wstring header = L"D3DKMTQueryResourceInfoFromNtHandle 被调用 ";
+ std::wstring header = L"D3DKMTQueryResourceInfoFromNtHandle 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L" hDevice:0x%llX, hNtHandle:0x%p", (unsigned long long)pData->hDevice, pData->hNtHandle);
 
@@ -477,25 +552,12 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTQueryResourceInfoFromNtHandle(D3DKM
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateAllocation(D3DKMT_CREATEALLOCATION* pData) {
- std::wstring header = L"D3DKMTCreateAllocation 被调用 ";
- LogMessage(header.c_str());
- LogMessage(L" hDevice:0x%llX, NumAllocations: %u", (unsigned long long)pData->hDevice, pData->NumAllocations);
-
  NTSTATUS result = s_OriginalCreateAllocation ? s_OriginalCreateAllocation(pData) :0;
-
- LogMessage(L"D3DKMTCreateAllocation 返回:0x%X", result);
  return result;
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyAllocation(const D3DKMT_DESTROYALLOCATION* pData) {
- std::wstring header = L"D3DKMTDestroyAllocation 被调用 ";
- LogMessage(header.c_str());
- // Use AllocationCount member
- LogMessage(L" hDevice:0x%llX, AllocationCount: %u", (unsigned long long)pData->hDevice, pData->AllocationCount);
-
  NTSTATUS result = s_OriginalDestroyAllocation ? s_OriginalDestroyAllocation(const_cast<D3DKMT_DESTROYALLOCATION*>(pData)) :0;
-
- LogMessage(L"D3DKMTDestroyAllocation 返回:0x%X", result);
  return result;
 }
 
@@ -505,7 +567,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTGetDeviceState(D3DKMT_GETDEVICESTAT
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSetGammaRamp(const D3DKMT_SETGAMMARAMP* pData) {
- std::wstring header = L"D3DKMTSetGammaRamp 被调用 ";
+ std::wstring header = L"D3DKMTSetGammaRamp 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  // SETGAMMARAMP may have different member names; attempt to log common fields if present
  LogMessage(L"D3DKMTSetGammaRamp called");
@@ -517,7 +579,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSetGammaRamp(const D3DKMT_SETGAMMAR
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTWaitForVerticalBlankEvent(const D3DKMT_WAITFORVERTICALBLANKEVENT* pData) {
- std::wstring header = L"D3DKMTWaitForVerticalBlankEvent 被调用 ";
+ std::wstring header = L"D3DKMTWaitForVerticalBlankEvent 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  LogMessage(L"D3DKMTWaitForVerticalBlankEvent called");
 
@@ -538,7 +600,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenAdapterFromHdc(D3DKMT_OPENADAPT
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenAdapterFromDeviceName(D3DKMT_OPENADAPTERFROMDEVICENAME* pData) {
- std::wstring header = L"D3DKMTOpenAdapterFromDeviceName 被调用 " + AnsiToWString(",pDeviceName:") + std::wstring((pData->pDeviceName));
+ std::wstring header = L"D3DKMTOpenAdapterFromDeviceName 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__) + AnsiToWString(",pDeviceName:") + std::to_wstring(wchar_t(pData->pDeviceName));
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalOpenAdapterFromDeviceName ? s_OriginalOpenAdapterFromDeviceName(pData) :0;
  LogMessage(L"D3DKMTOpenAdapterFromDeviceName 返回:0x%X, hAdapter:0x%llX", result, (unsigned long long)pData->hAdapter);
@@ -546,7 +608,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenAdapterFromDeviceName(D3DKMT_OP
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenAdapterFromGdiDisplayName(D3DKMT_OPENADAPTERFROMGDIDISPLAYNAME* pData) {
- LogMessage(L"D3DKMTOpenAdapterFromGdiDisplayName 被调用 - DeviceName: %s", pData->DeviceName);
+ LogMessage(L"D3DKMTOpenAdapterFromGdiDisplayName 被调用 - DeviceName: %ls", pData->DeviceName);
  NTSTATUS result = s_OriginalOpenAdapterFromGdiDisplayName ? s_OriginalOpenAdapterFromGdiDisplayName(pData) :0;
  LogMessage(L"D3DKMTOpenAdapterFromGdiDisplayName 返回:0x%X, hAdapter:0x%llX", result, (unsigned long long)pData->hAdapter);
  return result;
@@ -555,7 +617,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOpenAdapterFromGdiDisplayName(D3DKM
 // -- Missing hook implementations added below --
 //
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateDevice(D3DKMT_CREATEDEVICE* pData) {
- std::wstring header = L"D3DKMTCreateDevice 被调用 ";
+ std::wstring header = L"D3DKMTCreateDevice 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalCreateDevice ? s_OriginalCreateDevice(pData) :0;
  LogMessage(L"D3DKMTCreateDevice 返回:0x%X", result);
@@ -563,15 +625,35 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateDevice(D3DKMT_CREATEDEVICE* p
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateContext(D3DKMT_CREATECONTEXT* pData) {
- std::wstring header = L"D3DKMTCreateContext 被调用 ";
+ std::wstring header = L"D3DKMTCreateContext 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalCreateContext ? s_OriginalCreateContext(pData) :0;
  LogMessage(L"D3DKMTCreateContext 返回:0x%X", result);
  return result;
 }
 
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMTCreateHwContext(D3DKMT_CREATEHWCONTEXT* pData)
+{
+    std::wstring header = L"Hooked_D3DKMTCreateHWContext 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
+    LogMessage(header.c_str());
+    NTSTATUS result = s_OriginalCreateHwContext ? s_OriginalCreateHwContext(pData) : 0;
+    LogMessage(L"Hooked_D3DKMTCreateHWContext 返回:0x%X", result);
+    return result;
+}
+
+
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateContextVirtual(D3DKMT_CREATECONTEXTVIRTUAL* pData)
+{
+    std::wstring header = L"Hooked_D3DKMTCreateContextVirtual 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
+    LogMessage(header.c_str());
+    NTSTATUS result = s_OriginalCreateContextVirtual ? s_OriginalCreateContextVirtual(pData) : 0;
+    LogMessage(L"Hooked_D3DKMTCreateContextVirtual 返回:0x%X", result);
+    return result;
+}
+
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyDevice(const D3DKMT_DESTROYDEVICE* pData) {
- std::wstring header = L"D3DKMTDestroyDevice 被调用 ";
+ std::wstring header = L"D3DKMTDestroyDevice 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalDestroyDevice ? s_OriginalDestroyDevice(const_cast<D3DKMT_DESTROYDEVICE*>(pData)) :0;
  LogMessage(L"D3DKMTDestroyDevice 返回:0x%X", result);
@@ -579,7 +661,7 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyDevice(const D3DKMT_DESTROYD
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyContext(const D3DKMT_DESTROYCONTEXT* pData) {
- std::wstring header = L"D3DKMTDestroyContext 被调用 ";
+ std::wstring header = L"D3DKMTDestroyContext 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalDestroyContext ? s_OriginalDestroyContext(const_cast<D3DKMT_DESTROYCONTEXT*>(pData)) :0;
  LogMessage(L"D3DKMTDestroyContext 返回:0x%X", result);
@@ -587,27 +669,12 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyContext(const D3DKMT_DESTROY
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTPresent(D3DKMT_PRESENT* pData) {
- std::wstring header = L"D3DKMTPresent 被调用 ";
+ std::wstring header = L"D3DKMTPresent 被调用 " + AnsiToWString(__FUNCTION__) + L" " + std::to_wstring(__LINE__);
  LogMessage(header.c_str());
  NTSTATUS result = s_OriginalPresent ? s_OriginalPresent(pData) :0;
  LogMessage(L"D3DKMTPresent 返回:0x%X", result);
  return result;
-}
-
-// New hook implementations
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSubmitCommand(D3DKMT_SUBMITCOMMAND* pData) {
- LogMessage(L"D3DKMTSubmitCommand 被调用 - CommandLength: %u", pData ? pData->CommandLength :0);
- NTSTATUS result = s_OriginalSubmitCommand ? s_OriginalSubmitCommand(pData) :0;
- LogMessage(L"D3DKMTSubmitCommand 返回:0x%X", result);
- return result;
-}
-
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateHwQueue(D3DKMT_CREATEHWQUEUE* pData) {
- LogMessage(L"D3DKMTCreateHwQueue 被调用");
- NTSTATUS result = s_OriginalCreateHwQueue ? s_OriginalCreateHwQueue(pData) :0;
- LogMessage(L"D3DKMTCreateHwQueue 返回:0x%X", result);
- return result;
-}
+}  
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTDestroyHwQueue(D3DKMT_DESTROYHWQUEUE* pData) {
  LogMessage(L"D3DKMTDestroyHwQueue 被调用");
@@ -624,16 +691,8 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTEnumAdapters(D3DKMT_ENUMADAPTERS* p
 }
 
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTLock(D3DKMT_LOCK* pData) {
- LogMessage(L"D3DKMTLock 被调用");
+ LogMessage(L"D3DKMTLock");
  NTSTATUS result = s_OriginalLock ? s_OriginalLock(pData) :0;
- LogMessage(L"D3DKMTLock 返回:0x%X", result);
- return result;
-}
-
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTUnlock(D3DKMT_UNLOCK* pData) {
- LogMessage(L"D3DKMTUnlock 被调用");
- NTSTATUS result = s_OriginalUnlock ? s_OriginalUnlock(pData) :0;
- LogMessage(L"D3DKMTUnlock 返回:0x%X", result);
  return result;
 }
 
@@ -679,14 +738,6 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTPresentMultiPlaneOverlay(D3DKMT_PRE
     return res;
 }
 
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateAllocation2(D3DKMT_CREATEALLOCATION* pData) {
-
- LogMessage(L"D3DKMTCreateAllocation2 被调用 - pData=%p", pData);
- NTSTATUS result = s_OriginalCreateAllocation2 ? s_OriginalCreateAllocation2(pData) :0;
- LogMessage(L"D3DKMTCreateAllocation2 返回:0x%X", result);
- return result;
-}
-
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTConnectDoorbell(D3DKMT_CONNECT_DOORBELL* pData) {
 
  LogMessage(L"D3DKMTConnectDoorbell 被调用 - pData=%p", pData);
@@ -708,14 +759,6 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateDCFromMemory(D3DKMT_CREATEDCF
  LogMessage(L"D3DKMTCreateDCFromMemory 被调用 - pData=%p", pData);
  NTSTATUS result = s_OriginalCreateDCFromMemory ? s_OriginalCreateDCFromMemory(pData) :0;
  LogMessage(L"D3DKMTCreateDCFromMemory 返回:0x%X", result);
- return result;
-}
-
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateHwContext(D3DKMT_CREATEHWCONTEXT* pData) {
-
- LogMessage(L"D3DKMTCreateHwContext 被调用 - pData=%p", pData);
- NTSTATUS result = s_OriginalCreateHwContext ? s_OriginalCreateHwContext(pData) :0;
- LogMessage(L"D3DKMTCreateHwContext 返回:0x%X", result);
  return result;
 }
 
@@ -767,22 +810,6 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTGetPresentHistory(D3DKMT_GETPRESENT
  return result;
 }
 
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTLock2(D3DKMT_LOCK2* pData) {
-
- LogMessage(L"D3DKMTLock2 被调用 - pData=%p", pData);
- NTSTATUS result = s_OriginalLock2 ? s_OriginalLock2(pData) :0;
- LogMessage(L"D3DKMTLock2 返回:0x%X", result);
- return result;
-}
-
-NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTMapGpuVirtualAddress(D3DDDI_MAPGPUVIRTUALADDRESS* pData) {
-
- LogMessage(L"D3DKMTMapGpuVirtualAddress 被调用 - pData=%p", pData);
- NTSTATUS result = s_OriginalMapGpuVirtualAddress ? s_OriginalMapGpuVirtualAddress(pData) :0;
- LogMessage(L"D3DKMTMapGpuVirtualAddress 返回:0x%X", result);
- return result;
-}
-
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTOfferAllocations(D3DKMT_OFFERALLOCATIONS* pData) {
 
  LogMessage(L"D3DKMTOfferAllocations 被调用 - pData=%p", pData);
@@ -831,11 +858,30 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSetDisplayMode(D3DKMT_SETDISPLAYMOD
  return result;
 }
 
+static void* hwqueueCpuFenceAddress = nullptr;
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSubmitCommand(D3DKMT_SUBMITCOMMAND* pData) {
+    LogMessage(L"D3DKMTSubmitCommand 被调用 - CommandLength: %u", pData ? pData->CommandLength : 0);
+    NTSTATUS result = s_OriginalSubmitCommand ? s_OriginalSubmitCommand(pData) : 0;
+    return result;
+}
+
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateHwQueue(D3DKMT_CREATEHWQUEUE* pData) {
+    LogMessage(L"D3DKMTCreateHwQueue 被调用");
+    //pData->Flags.UserModeSubmission = 1; //强制使用doorbell方式
+    NTSTATUS result = s_OriginalCreateHwQueue ? s_OriginalCreateHwQueue(pData) : 0;
+    hwqueueCpuFenceAddress = pData->HwQueueProgressFenceCPUVirtualAddress;
+    volatile UINT64* pFenceValue = (UINT64*)hwqueueCpuFenceAddress;
+    LogMessage(L"Hooked_D3DKMTCreateHwQueue hHwQueueProgressFence: %d, FenceValue :%d ", pData->hHwQueueProgressFence, *pFenceValue);
+    return result;
+}
+
 NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSubmitCommandToHwQueue(D3DKMT_SUBMITCOMMANDTOHWQUEUE* pData) {
 
- LogMessage(L"D3DKMTSubmitCommandToHwQueue 被调用 - pData=%p", pData);
+ LogMessage(L"D3DKMTSubmitCommandToHwQueue 被调用");
  NTSTATUS result = s_OriginalSubmitCommandToHwQueue ? s_OriginalSubmitCommandToHwQueue(pData) :0;
- LogMessage(L"D3DKMTSubmitCommandToHwQueue 返回:0x%X", result);
+ volatile UINT64* pFenceValue = (UINT64*)hwqueueCpuFenceAddress;
+ LogMessage(L"Hooked_D3DKMTSubmitCommandToHwQueue :HwQueueProgressFenceId :%u, hwqueue cpu FenceValue :%d ", pData->HwQueueProgressFenceId, *pFenceValue);
+
  return result;
 }
 
@@ -853,4 +899,138 @@ NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTSubmitPresentToHwQueue(D3DKMT_SUBMI
  NTSTATUS result = s_OriginalSubmitPresentToHwQueue ? s_OriginalSubmitPresentToHwQueue(pData) :0;
  LogMessage(L"D3DKMTSubmitPresentToHwQueue 返回:0x%X", result);
  return result;
+}
+
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTLock2(D3DKMT_LOCK2* pData) {
+    LogMessage(L"D3DKMTLock2 被调用");
+    NTSTATUS result = s_OriginalLock2 ? s_OriginalLock2(pData) : 0;
+    return result;
+}
+
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTUnlock2(D3DKMT_UNLOCK2* pData) {
+    LogMessage(L"D3DKMTUnlock2");
+    NTSTATUS result = s_OriginalUnlock2 ? s_OriginalUnlock2(pData) : 0;
+    return result;
+}
+
+static int mapcount = 0;
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTMapGpuVirtualAddress(D3DDDI_MAPGPUVIRTUALADDRESS* pData) {
+    mapcount++;
+    LogMessage(L"Hooked_D3DKMTMapGpuVirtualAddress 被调用 mapcount:%d", mapcount);
+    NTSTATUS result = s_OriginalMapGpuVirtualAddress ? s_OriginalMapGpuVirtualAddress(pData) : 0;
+    LogMessage(L"D3DKMTMapGpuVirtualAddress hAllocation %d, PagingFenceValue:%ld", pData->hAllocation, pData->PagingFenceValue);
+    return result;
+}
+
+static int allocationCout = 0;
+NTSTATUS WINAPI KMTInterceptor::Hooked_D3DKMTCreateAllocation2(D3DKMT_CREATEALLOCATION* pData) {
+    LogMessage(L"Hooked_D3DKMTCreateAllocation2 被调用");
+    allocationCout++;
+    NTSTATUS result = s_OriginalCreateAllocation2 ? s_OriginalCreateAllocation2(pData) : 0;
+    LogMessage(L"D3DKMTCreateAllocation2 hAllocation: %u", pData->pAllocationInfo2->hAllocation);
+    if (pData->pAllocationInfo2->GpuVirtualAddress != 0) {
+        LogMessage(L"Hooked_D3DKMTCreateAllocation2 GpuVirtualAddress :0x%X", pData->pAllocationInfo2->GpuVirtualAddress);
+    }
+    return result;
+}
+
+static void* pagequeueaddr = nullptr;
+static int residentCount = 0;
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMTMAKERESIDENT(D3DDDI_MAKERESIDENT* pData)
+{
+    LogMessage(L"Hooked_D3DKMTMAKERESIDENT 被调用");
+    residentCount++;
+    NTSTATUS result = s_OriginalMakeResident ? s_OriginalMakeResident(pData) : 0;
+    volatile UINT64* pFenceValue = (UINT64*)pagequeueaddr;
+    LogMessage(L"Hooked_D3DKMTMAKERESIDENT residentCount:%d, hAllocation :%u, pagequeue cpu FenceValue :%d ", residentCount, pData->AllocationList[0] ,*pFenceValue);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMTEVICT(D3DKMT_EVICT* pData)
+{
+    LogMessage(L"Hooked_D3DKMTEVICT 被调用 - pData=%p", pData);
+    NTSTATUS result = s_OriginalEvict ? s_OriginalEvict(pData) : 0;
+    LogMessage(L"Hooked_D3DKMTEVICT 返回:0x%X", result);
+    return result;
+}
+
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMTCREATEPAGINGQUEUE(D3DKMT_CREATEPAGINGQUEUE* pData)
+{
+    LogMessage(L"Hooked_D3DKMTCREATEPAGINGQUEUE 被调用");
+    NTSTATUS result = s_OriginalCreatePagingQueue ? s_OriginalCreatePagingQueue(pData) : 0;
+    pagequeueaddr = pData->FenceValueCPUVirtualAddress;
+    volatile UINT64* pFenceValue = (UINT64*)pagequeueaddr;
+    LogMessage(L"Hooked_D3DKMTCREATEPAGINGQUEUE hSyncObject: %d, FenceValue :%d ", pData->hSyncObject, *pFenceValue);
+    return result;
+}
+
+static int createsysCount = 0;
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT(D3DKMT_CREATESYNCHRONIZATIONOBJECT* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT 被调用");
+    NTSTATUS result = s_OriginalCreateSysObj ? s_OriginalCreateSysObj(pData) : 0;
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT2(D3DKMT_CREATESYNCHRONIZATIONOBJECT2* pData)
+{
+    createsysCount++;
+    LogMessage(L"Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT2 被调用");
+    NTSTATUS result = s_OriginalCreateSysObj2 ? s_OriginalCreateSysObj2(pData) : 0;
+    volatile UINT64* pFenceValue = (UINT64*)pData->Info.MonitoredFence.FenceValueCPUVirtualAddress;
+    LogMessage(L"Hooked_D3DKMT_CREATESYNCHRONIZATIONOBJECT2 hSyncObject:%d, current cpu FenceValue:%d,createsysCount:%d", pData->hSyncObject ,*pFenceValue, createsysCount);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU(D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU 被调用");
+    NTSTATUS result = s_OriginalWaitSysObjCpu ? s_OriginalWaitSysObjCpu(pData) : 0;
+    UINT64 pFenceValue = pData->FenceValueArray[0];
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU 返回:target wait FenceValue :%d", pFenceValue);
+    UINT64 handle = (UINT64)pData->ObjectHandleArray[0];
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU target wait hSyncObject :%d", handle);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU(D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU 被调用 - pData=%p", pData);
+    NTSTATUS result = s_OriginalSignalSysObjCpu ? s_OriginalSignalSysObjCpu(pData) : 0;
+    UINT64 pFenceValue = (UINT64)pData->FenceValueArray[0];
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU signal FenceValue to CPU:%d", pFenceValue);
+    UINT64 handle = (UINT64)pData->ObjectHandleArray[0];
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU signal hSyncObject :%d", handle);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU(D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU 被调用");
+    NTSTATUS result = s_OriginalWaitSysObGpu ? s_OriginalWaitSysObGpu(pData) : 0;
+    UINT64 pFenceValue = (UINT64)pData->MonitoredFenceValueArray[0];
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU target wait FenceValue :%d", pFenceValue);
+    UINT64 handle = (UINT64)pData->ObjectHandleArray[0];
+    LogMessage(L"Hooked_D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMGPU target wait hSyncObject :%d", handle);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU(D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU 被调用 - pData=%p", pData);
+    NTSTATUS result = s_OriginalSignalSysObjGpu ? s_OriginalSignalSysObjGpu(pData) : 0;
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU 返回:0x%X", result);
+    return result;
+}
+
+NTSTATUS __stdcall KMTInterceptor::Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2(D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2* pData)
+{
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2 被调用");
+    NTSTATUS result = s_OriginalSignalSysObjGpu2 ? s_OriginalSignalSysObjGpu2(pData) : 0;
+    UINT64 pFenceValue = (UINT64)pData->MonitoredFenceValueArray[0];
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2 signal FenceValue to GPU:%d", pFenceValue);
+    UINT64 handle = (UINT64)pData->ObjectHandleArray[0];
+    LogMessage(L"Hooked_D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU2 signal hSyncObject :%d", handle);
+    return result;
 }

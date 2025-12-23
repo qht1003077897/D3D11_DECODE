@@ -1,5 +1,4 @@
 ﻿#include "D3D1_DECODE.h"
-
 #ifndef WINVER
 #define WINVER 0x0A00
 #endif
@@ -141,7 +140,6 @@ bool FFmpegD3D11Decoder::decode_loop()
 {
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
-    AVFrame *sw_frame = av_frame_alloc();
     int ret = 0;
 
     while (av_read_frame(fmt_ctx, pkt) >= 0) {
@@ -159,24 +157,9 @@ bool FFmpegD3D11Decoder::decode_loop()
                     goto cleanup;
                 }
 
-                AVFrame *upload_frame = nullptr;
-
-                if (frame->format == hw_pix_fmt) {
-                    // transfer to system memory
-                    ret = av_hwframe_transfer_data(sw_frame, frame, 0);
-                    if (ret < 0) {
-                        print_av_error("av_hwframe_transfer_data", ret);
-                        goto cleanup;
-                    }
-                    upload_frame = sw_frame;
-                } else {
-                    upload_frame = frame;
-                }
-
-                std::cout << "Decoded and uploaded frame." << std::endl;
+                std::cout << "Decoded frame." << std::endl;
 
                 av_frame_unref(frame);
-                av_frame_unref(sw_frame);
             }
         }
         av_packet_unref(pkt);
@@ -185,7 +168,6 @@ bool FFmpegD3D11Decoder::decode_loop()
 cleanup:
     av_packet_free(&pkt);
     av_frame_free(&frame);
-    av_frame_free(&sw_frame);
     return true;
 }
 
@@ -210,7 +192,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     avformat_network_init();
 
     FFmpegD3D11Decoder decoder;
-    if (!decoder.open("D:\\AVSYNC.mp4")) {
+    if (!decoder.open("C:\\yg.mp4")) {
         std::cerr << "Failed to open decoder." << std::endl;
         return -1;
     }
@@ -219,13 +201,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
    
     KMTInterceptor::Shutdown();
     std::cout << "Application exiting..." << std::endl;
-    return 0;
-}
-
-int main(int argc, char **argv)
-{
-
-
-    std::cout << "Decoding finished." << std::endl;
     return 0;
 }
